@@ -17,6 +17,11 @@ git clone --recursive git@github.com:CompTop/pyhera.git
 python setup.py install
 ```
 
+## Data
+The synthetic data sets we used in paper are all in ipynb notebooks. Real life data sets are from
+1. COIL-100: https://www.kaggle.com/jessicali9530/coil100/download
+2. Natural Image Patches: http://pirsquared.org/research/vhatdb/full/vanhateren_iml.zip 
+
 ## How to use
 The main function for our dimension reduction method on a data set `X` with shape (n,p) is 
 ```Python
