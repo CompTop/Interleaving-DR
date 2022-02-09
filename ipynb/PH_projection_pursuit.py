@@ -5,7 +5,8 @@ import numpy as np
 from tqdm import tqdm
 from scipy.spatial.distance import directed_hausdorff
 from torch_tda.nn import RipsLayer, Rips0Layer, BottleneckLayer, WassersteinLayer, BarcodePolyFeature
-from herabottleneck import BottleneckLayerHera
+from torch_tda.nn import BottleneckLayerHera
+# from herabottleneck import BottleneckLayerHera
 import torch.nn as nn
 from torch.nn.utils.parametrizations import orthogonal
 import scipy.sparse.linalg as sla
@@ -56,7 +57,7 @@ ortho = True,
 optimizer_ = 'SGD', 
 metric = 'euclidean', 
 sparse = False, 
-print_info=False):
+print_info = False, *args, **kwargs):
     """
     projection pursuit to minimize bottleneck distance
     
@@ -74,7 +75,8 @@ print_info=False):
     PCA: True if you want to add a PCA penalty variance with weight `pca_weight`
     sparse: True is use sparse Rips construction
     metric: supports various options of metric in BATs: L1, euclidean, etc..
-
+    initial_weights: initial weights/projection matrix, e.g. from PCA
+    
     returns:
     -----------
     projection matrix P
@@ -84,10 +86,17 @@ print_info=False):
     X = np.array(X, order = 'c') # necessary!!! If you data is not stored in C style
     n, p = X.shape
 
+    linear_layer = nn.Linear(p, dim, bias=False, dtype=torch.double)
+    
+    # initial weights/projection matrix, e.g. from PCA
+    initial_weights = kwargs.get('initial_weights', None)
+    if initial_weights != None:
+        linear_layer.weight = nn.Parameter(initial_weights)
+
     if ortho:
-        model_lin = orthogonal(nn.Linear(p, dim, bias=False, dtype=torch.double))
+        model_lin = orthogonal(linear_layer)
     else: 
-        model_lin = nn.Linear(p, dim, bias=False, dtype=torch.double)
+        model_lin = linear_layer
     
     if sparse:
         layer = RipsLayer(maxdim=1, sparse = True, eps = 0.5,
@@ -122,6 +131,7 @@ print_info=False):
 #     for i in tqdm(range(10)):
 #         for j in tqdm(range(10)):
     lrs = []
+    bd0, bd1 = 0, 0
     for i in range(scheduler_iter):
         for j in range(optimizer_iter):
             ts = []
@@ -178,8 +188,9 @@ print_info=False):
             scheduler.step()
             # lrs.append(scheduler.get_last_lr())
             
-        
-        opt_info = {'bottleneck dist': bd, 'losses': losses, 'lrs': lrs}
+        bd0 = bd0.detach().numpy()
+        bd1 = bd1.detach().numpy()
+        opt_info = {'bd0': bd0, 'bd1':bd1, 'losses': losses, 'lrs': lrs, 'X_dr': XVt.detach().numpy()}
 
     return model_lin.weight.detach().numpy(), opt_info
 

@@ -1,5 +1,5 @@
-from torch_tda.nn import RipsLayer, Rips0Layer, BottleneckLayer, WassersteinLayer, BarcodePolyFeature
-import bats
+# This script is not necessary and equivalent to 
+# use `from torch_tda.nn import BottleneckLayerHera`
 import torch
 import torch.nn as nn
 from torch.autograd import Function
