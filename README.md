@@ -10,12 +10,12 @@ In order to re-run the experiments we have in the `ipynb` folder, you will need 
 ### torch_tda
 `torch_tda` is used for optimzation on persistnet homology based on Pytorch, which supports auto differention. To install it, see the [installation page](https://torch-tda.readthedocs.io/en/latest/)(we suggest install from source files).
 
-### Hera
+<!-- ### Hera
 Hera is used to compute bottleneck distance between two persistent diagrams, which has been proved to be much faster than Persim in our experiments. In order to install `hera_tda`, first install `boost` in your OS, then
 ```
 git clone --recursive git@github.com:CompTop/pyhera.git
 python setup.py install
-```
+``` -->
 
 ## Data
 The synthetic data sets we used in paper are all in ipynb notebooks. Real life data sets are from
