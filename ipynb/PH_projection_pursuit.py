@@ -5,11 +5,12 @@ import numpy as np
 from tqdm import tqdm
 from scipy.spatial.distance import directed_hausdorff
 from torch_tda.nn import RipsLayer, Rips0Layer, BottleneckLayer, WassersteinLayer, BarcodePolyFeature
-from torch_tda.nn import BottleneckLayerHera
+from torch_tda.nn import BottleneckLayerHera # torch-tda now support it
 # from herabottleneck import BottleneckLayerHera
 import torch.nn as nn
 from torch.nn.utils.parametrizations import orthogonal
 import scipy.sparse.linalg as sla
+from sklearn.decomposition import PCA # for PCA analysis
 
 def cayley_update(V, dV, tau):
     """
@@ -43,6 +44,55 @@ def cayley_update(V, dV, tau):
         X[:,j] = xj
     return X
 
+def cayley_bottleneck_pursuit(X, lrs = np.hstack((np.repeat(1e-3,15), np.repeat(1e-4,105), np.repeat(1e-5,50))),
+                              opt_dim = 1):
+    Xt = torch.tensor(X, dtype=torch.double)
+    layer = RipsLayer(maxdim=1, metric = 'euclidean')
+    ground_truth_dgm = layer(Xt)
+
+    pca = PCA(n_components=2).fit(X)
+    P = pca.components_ # using the orthonormal matrix from PCA 
+    P = P.T
+    Pt = torch.tensor(P, dtype=torch.double, requires_grad=True)
+
+    crit = BottleneckLayerHera()
+    # lrs = np.hstack((np.repeat(1e-3,15), np.repeat(1e-4,105), np.repeat(1e-5,50)))
+    losses = []
+    bd0, bd1 = torch.zeros(1), torch.zeros(1)
+    for lr in tqdm(lrs):
+        Yt = torch.mm(Xt, Pt)
+        Y_dgm = layer(Yt)
+        
+        if opt_dim == 1:
+            bd1 = crit(Y_dgm[1], ground_truth_dgm[1])
+            loss = bd1
+        elif opt_dim == 10:
+            bd0 = crit(Y_dgm[0], ground_truth_dgm[0])
+            bd1 = crit(Y_dgm[1], ground_truth_dgm[1])
+            loss = bd0 + bd1
+        else:
+            bd0 = crit(Y_dgm[0], ground_truth_dgm[0])
+            loss = bd0
+            
+        losses.append(loss.detach().numpy())
+    #     print(loss.detach().numpy())
+
+        try:
+            Pt.grad.zero_()
+        except:
+            pass
+
+        loss.backward()
+
+        # detach from torch to do update
+        dP = Pt.grad.detach().numpy()
+        P = cayley_update(P, dP, lr)
+        # put back in tensor
+        Pt.data = torch.tensor(P)
+    
+    opt_info = {'bd0': bd0, 'bd1':bd1, 'losses': losses}
+    return Pt, opt_info
+
 
 
 def get_lr(optimizer):
@@ -50,7 +100,8 @@ def get_lr(optimizer):
         return param_group['lr']
 
 def bottleneck_proj_pursuit(X, dim=2, opt_dim=10, optimizer_iter = 10, scheduler_iter = 10, 
-flags = (bats.standard_reduction_flag(),bats.compression_flag()),
+flags = (bats.standard_reduction_flag(),bats.clearing_flag()),
+degree = +1,
 PCA = False,
 pca_weight = 0.5,
 ortho = True,
@@ -83,7 +134,7 @@ print_info = False, *args, **kwargs):
     optimization information opt_info
     """
 
-    X = np.array(X, order = 'c') # necessary!!! If you data is not stored in C style
+    X = np.array(X, order = 'c') # necessary!!! If your data is not stored in C style
     n, p = X.shape
 
     linear_layer = nn.Linear(p, dim, bias=False, dtype=torch.double)
@@ -105,7 +156,7 @@ print_info = False, *args, **kwargs):
         if opt_dim == 0:
             layer = Rips0Layer()
         else:
-            layer = RipsLayer(maxdim=1, metric = metric,
+            layer = RipsLayer(maxdim=1, degree = degree, metric = metric, 
                               reduction_flags=flags)
 
     Xt = torch.tensor(X, dtype=torch.double)
@@ -118,7 +169,7 @@ print_info = False, *args, **kwargs):
     crit = BottleneckLayerHera()
 
     if optimizer_ == 'SGD':
-        optimizer = torch.optim.SGD(model_lin.parameters(), lr=1e-3, momentum=0.5)
+        optimizer = torch.optim.SGD(model_lin.parameters(), lr=1e-4, momentum=0.5)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.5)
     if optimizer_ == 'Adam':
         optimizer = torch.optim.Adam(model_lin.parameters(), weight_decay=0.5)
@@ -131,8 +182,8 @@ print_info = False, *args, **kwargs):
 #     for i in tqdm(range(10)):
 #         for j in tqdm(range(10)):
     lrs = []
-    bd0, bd1 = 0, 0
-    for i in range(scheduler_iter):
+    bd0, bd1 = torch.zeros(1), torch.zeros(1)
+    for i in tqdm(range(scheduler_iter)):
         for j in range(optimizer_iter):
             ts = []
             t0_total = time.monotonic()
@@ -154,9 +205,9 @@ print_info = False, *args, **kwargs):
                 bd = bd1.detach().numpy()
             
             if opt_dim == 0: # only dim 0
-                bd1 = crit(Y_dgm[0], ground_truth_dgm[0])
-                loss = bd1
-                bd = bd1.detach().numpy()
+                bd0 = crit(Y_dgm[0], ground_truth_dgm[0])
+                loss = bd0
+                bd = bd0.detach().numpy()
             
             if PCA:
                 pca_layer = PCA_layer()
@@ -188,10 +239,10 @@ print_info = False, *args, **kwargs):
             scheduler.step()
             # lrs.append(scheduler.get_last_lr())
             
-        bd0 = bd0.detach().numpy()
-        bd1 = bd1.detach().numpy()
-        opt_info = {'bd0': bd0, 'bd1':bd1, 'losses': losses, 'lrs': lrs, 'X_dr': XVt.detach().numpy()}
-
+        # bd0 = bd0.detach().numpy()
+        # bd1 = bd1.detach().numpy()
+        
+    opt_info = {'bd0': bd0, 'bd1':bd1, 'losses': losses, 'lrs': lrs, 'X_dr': XVt.detach().numpy()}
     return model_lin.weight.detach().numpy(), opt_info
 
 def subsample_bats(X, k = 100):
