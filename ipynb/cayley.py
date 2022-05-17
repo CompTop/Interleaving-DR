@@ -127,3 +127,72 @@ def subsample_bats(X, k = 100):
     Xk = X[new_inds]
     dHX = dists[k]
     return Xk, new_inds, dHX
+
+
+def cayley_opt(X, crit, P=None, lrs=None):
+    """
+    Optimize projection
+    
+    Inputs:
+        X: data
+        crit: criterion to minimize.
+        P: Initial projection.  If None, will initialize with PCA
+        lrs: sequence of learning rates
+        crit: criterion to minimize
+        
+    Returns:
+        P: projection
+        losses: sequence of losses
+        
+        
+    example:
+    ```
+    dloss = diagram_loss(Y, bottleneck_wts=[0,1], wasserstein_wts=[0,0.01])
+    crit = lambda Y : dloss(Y) + 100*pca_loss(Y)
+    P, losses, Ps = cayley_opt(Y, crit, P=P, lrs=np.hstack((np.repeat(3e-3,23),)))
+    ```
+    
+    """
+    if P is None:
+        pca = PCA(n_components=2).fit(X)
+        P = pca.components_
+        P = P.T
+        
+    if lrs is None:
+        lrs = np.hstack((np.repeat(1e-3,15), np.repeat(1e-4,65), np.repeat(1e-5,10)))
+        
+    Xt = torch.tensor(X, dtype=torch.double)
+    Pt = torch.tensor(P, dtype=torch.double, requires_grad=True)
+    
+    
+    losses = []
+    Ps = [np.array(P, copy=True)]
+
+    for lr in tqdm(lrs):
+        Yt = torch.mm(Xt, Pt)
+
+        loss = crit(Yt)
+        losses.append(loss.detach().numpy())
+
+        try:
+            Pt.grad.zero_()
+        except:
+            pass
+
+        loss.backward()
+
+        # detach from torch to do update
+        dP = Pt.grad.detach().numpy()
+        P = cayley_update(P, dP, lr)
+        Ps.append(np.array(P, copy=True))
+        # put back in tensor
+        Pt.data = torch.tensor(P)
+        
+    
+    # append loss
+    Yt = torch.mm(Xt, Pt)
+    loss = crit(Yt)
+    losses.append(loss.detach().numpy())
+    
+        
+    return Pt.detach().numpy(), losses, Ps
